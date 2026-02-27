@@ -68,6 +68,21 @@ To get a local copy up and running, follow these simple steps.
 5. **Access the Application:**
    Open your web browser and go to `http://127.0.0.1:5000/`.
 
+## Deployment (Render)
+
+This project is configured for easy deployment on [Render](https://render.com/).
+
+1. **Sign up / Log in** to Render and connect your GitHub account.
+2. Click on **New +** and select **Blueprint**.
+3. Connect the repository containing this project. Render will automatically detect the `render.yaml` file.
+4. **Important**: Since `credentials.json` is not committed to the repository, you need to provide it to the server.
+   - Go to your newly created Web Service on Render dashboard.
+   - Click on the **Environment** tab.
+   - Scroll down to **Secret Files** and click **Add Secret File**.
+   - Filename: `credentials.json`
+   - Contents: Paste the entire content of your local `credentials.json` file.
+5. Click **Save Changes** and restart your web service if it doesn't automatically.
+
 ## Folder Structure
 
 A complete overview of the project directory and its structure:
