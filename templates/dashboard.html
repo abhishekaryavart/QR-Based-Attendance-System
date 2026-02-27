@@ -1,0 +1,238 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<!-- Include Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<div class="dashboard-header">
+    <div>
+        <h2>Welcome Back</h2>
+        <p class="subtitle">Overview of today's attendance records.</p>
+    </div>
+</div>
+
+<div class="filter-bar glass"
+    style="border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1.5rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+    <div style="flex-grow: 1;">
+        <label for="dateFilter" style="font-weight: 500; font-size: 0.9rem; margin-right: 0.5rem;">Date</label>
+        <select id="dateFilter" onchange="applyFilters()"
+            style="padding: 0.4rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);"></select>
+    </div>
+    <div style="flex-grow: 1;">
+        <label for="classFilter" style="font-weight: 500; font-size: 0.9rem; margin-right: 0.5rem;">Class</label>
+        <select id="classFilter" onchange="applyFilters()"
+            style="padding: 0.4rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);"></select>
+    </div>
+    <div style="flex-grow: 1;">
+        <label for="semesterFilter" style="font-weight: 500; font-size: 0.9rem; margin-right: 0.5rem;">Semester</label>
+        <select id="semesterFilter" onchange="applyFilters()"
+            style="padding: 0.4rem; border-radius: var(--radius-md); border: 1px solid var(--border-color);"></select>
+    </div>
+    <button onclick="resetFilters()"
+        style="padding: 0.4rem 1rem; background: var(--primary-color); color: white; border: none; border-radius: var(--radius-md); cursor: pointer; transition: background 0.2s;">Reset</button>
+</div>
+
+<div class="dashboard-grid">
+    <!-- Stats Widget -->
+    <div class="card stat-card glass">
+        <div class="stat-icon">
+            <span class="material-icons-outlined">people</span>
+        </div>
+        <div class="stat-info">
+            <h3>Total Attendance</h3>
+            <p class="stat-number" id="totalCountDisplay">0</p>
+        </div>
+    </div>
+
+    <!-- Chart Widget -->
+    <div class="card chart-card glass">
+        <div class="card-header">
+            <h3>Attendance by Class</h3>
+            <span class="material-icons-outlined">bar_chart</span>
+        </div>
+        <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
+            <canvas id="attendanceChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Data Table Widget -->
+<div class="card table-card glass">
+    <div class="card-header table-card-header">
+        <h3>Attendance Details</h3>
+        <div class="search-box">
+            <span class="material-icons-outlined search-icon">search</span>
+            <input type="text" id="searchInput" onkeyup="applyFilters()"
+                placeholder="Search by name, class, or enroll ID...">
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Student Name</th>
+                    <th>Enroll ID</th>
+                    <th>Class</th>
+                    <th>Semester</th>
+                    <th>Attendance Records</th>
+                </tr>
+            </thead>
+            <tbody id="attendanceTableBody">
+                <!-- Rows injected via JavaScript -->
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    // Injected raw data from Flask backend
+    const rawData = JSON.parse('{{ attendance_data_json | safe }}');
+
+    let chartInstance = null;
+
+    function populateDropdowns() {
+        const dates = new Set();
+        const classes = new Set();
+        const semesters = new Set();
+
+        rawData.forEach(record => {
+            if (record.date) dates.add(record.date);
+            if (record.class) classes.add(record.class);
+            if (record.semester) semesters.add(record.semester);
+        });
+
+        const dateSelect = document.getElementById('dateFilter');
+        const classSelect = document.getElementById('classFilter');
+        const semSelect = document.getElementById('semesterFilter');
+
+        dateSelect.innerHTML = '<option value="">All Dates</option>' + Array.from(dates).sort().map(d => `<option value="${d}">${d}</option>`).join('');
+        classSelect.innerHTML = '<option value="">All Classes</option>' + Array.from(classes).sort().map(c => `<option value="${c}">${c}</option>`).join('');
+        semSelect.innerHTML = '<option value="">All Semesters</option>' + Array.from(semesters).sort().map(s => `<option value="${s}">${s}</option>`).join('');
+    }
+
+    function resetFilters() {
+        document.getElementById('searchInput').value = "";
+        document.getElementById('dateFilter').value = "";
+        document.getElementById('classFilter').value = "";
+        document.getElementById('semesterFilter').value = "";
+        applyFilters();
+    }
+
+    function applyFilters() {
+        const searchText = document.getElementById('searchInput').value.toLowerCase();
+        const selectedDate = document.getElementById('dateFilter').value;
+        const selectedClass = document.getElementById('classFilter').value;
+        const selectedSem = document.getElementById('semesterFilter').value;
+
+        // Filter the raw records first
+        const filteredRecords = rawData.filter(record => {
+            const matchesSearch = record.name.toLowerCase().includes(searchText) ||
+                record.class.toLowerCase().includes(searchText) ||
+                record.enroll_id.toLowerCase().includes(searchText);
+            const matchesDate = !selectedDate || record.date === selectedDate;
+            const matchesClass = !selectedClass || record.class === selectedClass;
+            const matchesSem = !selectedSem || record.semester === selectedSem;
+
+            return matchesSearch && matchesDate && matchesClass && matchesSem;
+        });
+
+        // 1) Aggregate for the Table (by Student Enroll_ID or Name+Class)
+        const studentAgg = {};
+        filteredRecords.forEach(rec => {
+            const key = rec.enroll_id || `${rec.name}_${rec.class}`;
+            if (!studentAgg[key]) {
+                studentAgg[key] = {
+                    name: rec.name,
+                    enroll_id: rec.enroll_id,
+                    class: rec.class,
+                    semester: rec.semester,
+                    count: 0
+                };
+            }
+            studentAgg[key].count += 1;
+        });
+        const tableData = Object.values(studentAgg).sort((a, b) => b.count - a.count);
+
+        // 2) Aggregate for the Chart (by Class)
+        const classAgg = {};
+        let totalCount = 0;
+        tableData.forEach(student => {
+            totalCount += student.count;
+            if (!classAgg[student.class]) classAgg[student.class] = 0;
+            classAgg[student.class] += student.count;
+        });
+
+        // 3) Update DOM Elements
+        document.getElementById('totalCountDisplay').innerText = totalCount;
+        renderTable(tableData);
+        renderChart(classAgg);
+    }
+
+    function renderTable(tableData) {
+        const tbody = document.getElementById('attendanceTableBody');
+        tbody.innerHTML = '';
+
+        if (tableData.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 2rem;">No attendance records found matching the filters.</td></tr>';
+            return;
+        }
+
+        tableData.forEach(entry => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${entry.name}</td>
+                <td style="color: var(--text-muted); font-size: 0.85rem;">${entry.enroll_id || '-'}</td>
+                <td><span class="badge">${entry.class}</span></td>
+                <td>${entry.semester || '-'}</td>
+                <td class="count-col"><strong>${entry.count}</strong></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function renderChart(classData) {
+        const ctx = document.getElementById('attendanceChart').getContext('2d');
+        const labels = Object.keys(classData);
+        const data = Object.values(classData);
+
+        // Define clean gradient matching our CSS theme
+        let gradient = ctx.createLinearGradient(0, 0, 0, 400);
+        gradient.addColorStop(0, 'rgba(79, 70, 229, 0.8)');
+        gradient.addColorStop(1, 'rgba(139, 92, 246, 0.8)');
+
+        if (chartInstance) {
+            chartInstance.destroy();
+        }
+
+        chartInstance = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels.length > 0 ? labels : ['No Data'],
+                datasets: [{
+                    label: 'Attendance Count',
+                    data: data.length > 0 ? data : [0],
+                    backgroundColor: gradient,
+                    borderRadius: 6,
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                    x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    // Initialize Page
+    document.addEventListener("DOMContentLoaded", () => {
+        populateDropdowns();
+        applyFilters();
+    });
+</script>
+{% endblock %}
